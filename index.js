@@ -11,6 +11,10 @@ const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP;
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID;
 const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 
+const VERIFY_TOKEN = "cove_verify_123";
+
+const ordersMap = {};
+
 async function getShopifyToken() {
   const response = await axios.post(
     `https://${SHOPIFY_SHOP}/admin/oauth/access_token`,
@@ -19,11 +23,7 @@ async function getShopifyToken() {
       client_id: SHOPIFY_CLIENT_ID,
       client_secret: SHOPIFY_CLIENT_SECRET
     }),
-    {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
-      }
-    }
+    { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
   );
 
   return response.data.access_token;
@@ -32,18 +32,11 @@ async function getShopifyToken() {
 async function addShopifyTag(orderId, tag) {
   const token = await getShopifyToken();
 
-  const gid = `gid://shopify/Order/${orderId}`;
-
   const mutation = `
     mutation tagsAdd($id: ID!, $tags: [String!]!) {
       tagsAdd(id: $id, tags: $tags) {
-        node {
-          id
-        }
-        userErrors {
-          field
-          message
-        }
+        node { id }
+        userErrors { field message }
       }
     }
   `;
@@ -53,7 +46,7 @@ async function addShopifyTag(orderId, tag) {
     {
       query: mutation,
       variables: {
-        id: gid,
+        id: `gid://shopify/Order/${orderId}`,
         tags: [tag]
       }
     },
@@ -66,11 +59,10 @@ async function addShopifyTag(orderId, tag) {
   );
 
   const errors = response.data?.data?.tagsAdd?.userErrors;
-  if (errors?.length) {
-    throw new Error(JSON.stringify(errors));
-  }
+  if (errors?.length) throw new Error(JSON.stringify(errors));
 }
 
+// Shopify order webhook
 app.post("/order", async (req, res) => {
   const order = req.body;
 
@@ -83,6 +75,8 @@ app.post("/order", async (req, res) => {
     console.log("No phone number found");
     return res.sendStatus(200);
   }
+
+  ordersMap[phone] = order.id;
 
   try {
     await axios.post(
@@ -125,9 +119,65 @@ app.post("/order", async (req, res) => {
 
     await addShopifyTag(order.id, "WhatsApp Sent");
 
-    console.log("✅ WhatsApp sent and tag added:", order.name);
+    console.log("✅ WhatsApp sent + tag added:", order.name);
   } catch (err) {
-    console.log("❌ Error:", err.response?.data || err.message);
+    console.log("❌ Order error:", err.response?.data || err.message);
+  }
+
+  res.sendStatus(200);
+});
+
+// Meta webhook verification
+app.get("/whatsapp", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  console.log("Webhook verification request:", { mode, token, challenge });
+
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("✅ WhatsApp webhook verified");
+    return res.status(200).send(challenge);
+  }
+
+  console.log("❌ WhatsApp webhook verification failed");
+  return res.sendStatus(403);
+});
+
+// WhatsApp replies webhook
+app.post("/whatsapp", async (req, res) => {
+  try {
+    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+
+    if (!message) return res.sendStatus(200);
+
+    const from = message.from;
+    const buttonText =
+      message.button?.text ||
+      message.interactive?.button_reply?.title ||
+      "";
+
+    console.log("Reply from:", from);
+    console.log("Button clicked:", buttonText);
+
+    const orderId = ordersMap[from];
+
+    if (!orderId) {
+      console.log("No order linked to this phone:", from);
+      return res.sendStatus(200);
+    }
+
+    if (buttonText.toLowerCase() === "confirm") {
+      await addShopifyTag(orderId, "WhatsApp Confirmed");
+      console.log("✅ Added tag: WhatsApp Confirmed");
+    }
+
+    if (buttonText.toLowerCase() === "cancel") {
+      await addShopifyTag(orderId, "Cancel Requested");
+      console.log("✅ Added tag: Cancel Requested");
+    }
+  } catch (err) {
+    console.log("❌ WhatsApp webhook error:", err.response?.data || err.message);
   }
 
   res.sendStatus(200);

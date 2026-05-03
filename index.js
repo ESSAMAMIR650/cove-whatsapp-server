@@ -32,12 +32,12 @@ app.post("/order", async (req, res) => {
     "Not specified";
   const total = order.total_price || "0";
   const address = order.shipping_address
-    ? ${order.shipping_address.address1 || ""}, ${order.shipping_address.city || ""}
+    ? `${order.shipping_address.address1 || ""}, ${order.shipping_address.city || ""}`
     : "Not specified";
 
   try {
     await axios.post(
-      https://graph.facebook.com/v20.0/${PHONE_ID}/messages,
+      `https://graph.facebook.com/v20.0/${PHONE_ID}/messages`,
       {
         messaging_product: "whatsapp",
         to: phone,
@@ -63,7 +63,7 @@ app.post("/order", async (req, res) => {
       },
       {
         headers: {
-          Authorization: Bearer ${TOKEN},
+          Authorization: `Bearer ${TOKEN}`,
           "Content-Type": "application/json"
         }
       }

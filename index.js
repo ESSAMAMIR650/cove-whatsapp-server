@@ -7,10 +7,10 @@ app.use(express.json());
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_ID = "1056125900924733";
 
-// 🔹 Get Shopify token (auto every time)
+// 🔹 Shopify token generator
 async function getShopifyToken() {
   const response = await axios.post(
-    `https://${process.env.SHOPIFY_SHOP}/admin/oauth/access_token`,
+    https://${process.env.SHOPIFY_SHOP}/admin/oauth/access_token,
     new URLSearchParams({
       grant_type: "client_credentials",
       client_id: process.env.SHOPIFY_CLIENT_ID,
@@ -21,27 +21,26 @@ async function getShopifyToken() {
   return response.data.access_token;
 }
 
-// 🔹 Add tag to order
-async function addOrderTag(orderId, tag) {
+// 🔹 Add tag to Shopify order
+async function addOrderTag(orderId) {
   try {
     const token = await getShopifyToken();
-
-    const gid = `gid://shopify/Order/${orderId}`;
+    const gid = gid://shopify/Order/${orderId};
 
     await axios.post(
-      `https://${process.env.SHOPIFY_SHOP}/admin/api/2026-01/graphql.json`,
+      https://${process.env.SHOPIFY_SHOP}/admin/api/2026-01/graphql.json,
       {
-        query: `
+        query: 
           mutation tagsAdd($id: ID!, $tags: [String!]!) {
             tagsAdd(id: $id, tags: $tags) {
               node { id }
               userErrors { field message }
             }
           }
-        `,
+        ,
         variables: {
           id: gid,
-          tags: [tag]
+          tags: ["WhatsApp Sent"]
         }
       },
       {
@@ -52,29 +51,40 @@ async function addOrderTag(orderId, tag) {
       }
     );
 
-    console.log("✅ Shopify tag added:", tag);
+    console.log("✅ Tag added successfully");
   } catch (err) {
     console.log("❌ Shopify tag error:", err.response?.data || err.message);
   }
 }
 
-// 🔹 Shopify webhook
+// 🔹 Shopify webhook endpoint
 app.post("/order", async (req, res) => {
+  console.log("🔥 Shopify webhook received");
+
   const order = req.body;
+
+  console.log("Order ID:", order.id);
+  console.log("Order name:", order.name);
+  console.log("Order phone:", order.phone);
+  console.log("Customer phone:", order.customer?.phone);
+  console.log("Shipping phone:", order.shipping_address?.phone);
 
   const phone =
     order.phone?.replace("+", "") ||
     order.customer?.phone?.replace("+", "") ||
     order.shipping_address?.phone?.replace("+", "");
 
+  console.log("Final phone used:", phone);
+
   if (!phone) {
-    console.log("No phone number found");
+    console.log("❌ No phone number found");
     return res.sendStatus(200);
   }
 
   try {
+    // 🔹 Send WhatsApp message
     await axios.post(
-      `https://graph.facebook.com/v20.0/${PHONE_ID}/messages`,
+      https://graph.facebook.com/v20.0/${PHONE_ID}/messages,
       {
         messaging_product: "whatsapp",
         to: phone,
@@ -86,16 +96,16 @@ app.post("/order", async (req, res) => {
       },
       {
         headers: {
-          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          Authorization: Bearer ${WHATSAPP_TOKEN},
           "Content-Type": "application/json"
         }
       }
     );
 
-    console.log("✅ WhatsApp message sent to:", phone);
+    console.log("✅ WhatsApp message sent");
 
-    // 🔥 Add Shopify tag after sending message
-    await addOrderTag(order.id, "WhatsApp Sent");
+    // 🔹 Add tag
+    await addOrderTag(order.id);
 
   } catch (err) {
     console.log("❌ WhatsApp error:", err.response?.data || err.message);
@@ -104,9 +114,9 @@ app.post("/order", async (req, res) => {
   res.sendStatus(200);
 });
 
-// 🔹 Health check
+// 🔹 Test route
 app.get("/", (req, res) => {
-  res.send("Cove WhatsApp server is running");
+  res.send("Server is running");
 });
 
 const PORT = process.env.PORT || 3000;

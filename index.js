@@ -13,8 +13,6 @@ const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 
 const VERIFY_TOKEN = "cove_verify_123";
 
-const ordersMap = {};
-
 async function getShopifyToken() {
   const response = await axios.post(
     `https://${SHOPIFY_SHOP}/admin/oauth/access_token`,
@@ -76,8 +74,6 @@ app.post("/order", async (req, res) => {
     return res.sendStatus(200);
   }
 
-  ordersMap[phone] = order.id;
-
   try {
     await axios.post(
       `https://graph.facebook.com/v20.0/${PHONE_ID}/messages`,
@@ -105,6 +101,22 @@ app.post("/order", async (req, res) => {
                     : "Not specified"
                 }
               ]
+            },
+            {
+              type: "button",
+              sub_type: "quick_reply",
+              index: "0",
+              parameters: [
+                { type: "payload", payload: `confirm_${order.id}` }
+              ]
+            },
+            {
+              type: "button",
+              sub_type: "quick_reply",
+              index: "1",
+              parameters: [
+                { type: "payload", payload: `cancel_${order.id}` }
+              ]
             }
           ]
         }
@@ -119,7 +131,7 @@ app.post("/order", async (req, res) => {
 
     await addShopifyTag(order.id, "WhatsApp Sent");
 
-    console.log("✅ WhatsApp sent + tag added:", order.name);
+    console.log("✅ WhatsApp sent + WhatsApp Sent tag added:", order.name);
   } catch (err) {
     console.log("❌ Order error:", err.response?.data || err.message);
   }
@@ -133,18 +145,15 @@ app.get("/whatsapp", (req, res) => {
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  console.log("Webhook verification request:", { mode, token, challenge });
-
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
     console.log("✅ WhatsApp webhook verified");
     return res.status(200).send(challenge);
   }
 
-  console.log("❌ WhatsApp webhook verification failed");
   return res.sendStatus(403);
 });
 
-// WhatsApp replies webhook
+// WhatsApp button replies webhook
 app.post("/whatsapp", async (req, res) => {
   try {
     const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
@@ -157,24 +166,25 @@ app.post("/whatsapp", async (req, res) => {
       message.interactive?.button_reply?.title ||
       "";
 
+    const payload =
+      message.button?.payload ||
+      message.interactive?.button_reply?.id ||
+      "";
+
     console.log("Reply from:", from);
     console.log("Button clicked:", buttonText);
+    console.log("Payload:", payload);
 
-    const orderId = ordersMap[from];
-
-    if (!orderId) {
-      console.log("No order linked to this phone:", from);
-      return res.sendStatus(200);
-    }
-
-    if (buttonText.toLowerCase() === "confirm") {
+    if (payload.startsWith("confirm_")) {
+      const orderId = payload.replace("confirm_", "");
       await addShopifyTag(orderId, "WhatsApp Confirmed");
       console.log("✅ Added tag: WhatsApp Confirmed");
-    }
-
-    if (buttonText.toLowerCase() === "cancel") {
+    } else if (payload.startsWith("cancel_")) {
+      const orderId = payload.replace("cancel_", "");
       await addShopifyTag(orderId, "Cancel Requested");
       console.log("✅ Added tag: Cancel Requested");
+    } else {
+      console.log("No valid payload found");
     }
   } catch (err) {
     console.log("❌ WhatsApp webhook error:", err.response?.data || err.message);
